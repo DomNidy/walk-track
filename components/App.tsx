@@ -5,7 +5,7 @@
  * @format
  */
 
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Button,
   PermissionsAndroid,
@@ -18,9 +18,51 @@ import {
 import Geolocation from 'react-native-geolocation-service';
 function App(): JSX.Element {
   // state to hold location
-  const [location, setLocation] = useState<false | Geolocation.GeoPosition>(
-    false,
+  const [location, setLocation] = useState<null | Geolocation.GeoPosition>(
+    null,
   );
+
+  const [connectionStatus, setConectionStatus] = useState<boolean>(false);
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [locationUpdateIntervalMS] = useState<number>(1_000);
+
+  useEffect(() => {
+    setConectionStatus(!!ws && ws?.readyState === WebSocket.OPEN);
+  }, [ws, ws?.readyState]);
+
+  useEffect(() => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    const newsocket = new WebSocket('ws://10.0.2.2:8080');
+
+    console.log('ws', newsocket.readyState);
+
+    newsocket.onopen = () => {
+      // connection opened
+      console.log('opened');
+      newsocket.send('something'); // send a message
+      setConectionStatus(true);
+    };
+
+    newsocket.onclose = e => {
+      // connection closed
+      console.log('closed', e.code, e.reason);
+      setConectionStatus(false);
+    };
+
+    newsocket.onmessage = e => {
+      // a message was received
+      console.log(e.data);
+    };
+
+    setWs(newsocket);
+
+    return () => {
+      newsocket.close();
+    };
+  }, [ws?.readyState]);
 
   // Function to get permission for location
   const requestLocationPermission = async () => {
@@ -52,37 +94,75 @@ function App(): JSX.Element {
   const getLocation = () => {
     const result = requestLocationPermission();
     result.then(res => {
-      console.log('res is:', res);
       if (res) {
-        Geolocation.getCurrentPosition(
+        Geolocation.watchPosition(
           position => {
-            console.log(position);
             setLocation(position);
           },
           error => {
-            // See error code charts below.
-            console.log(error.code, error.message);
-            setLocation(false);
+            console.log(error);
           },
-          {enableHighAccuracy: true, timeout: 15000, maximumAge: 10000},
+          {
+            enableHighAccuracy: true,
+            interval: locationUpdateIntervalMS,
+          },
         );
       }
     });
-    console.log(location);
   };
 
+  // Routinely send location to server
+  useEffect(() => {
+    const sendLocationInterval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(location));
+      } else {
+        console.log("Not connected, can't send location");
+      }
+    }, locationUpdateIntervalMS);
+
+    return () => clearInterval(sendLocationInterval);
+  }, [location, locationUpdateIntervalMS, ws]);
+
+  function formatTimeDifference(timestamp: number) {
+    const lastUpdated = new Date(timestamp);
+    const now = new Date();
+    const diffInSeconds = Math.floor(
+      (now.getTime() - lastUpdated.getTime()) / 1000,
+    );
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    const diffInHours = Math.floor(diffInMinutes / 60);
+
+    if (diffInHours > 0) {
+      return `${diffInHours} hours`;
+    } else if (diffInMinutes > 0) {
+      return `${diffInMinutes} minutes`;
+    } else {
+      return `${diffInSeconds} seconds`;
+    }
+  }
   return (
     <SafeAreaView style={styles.backgroundStyles}>
       <Text style={styles.headerText}>WalkTrack</Text>
+      {connectionStatus ? (
+        <>
+          <Text style={styles.locationText}>Connected</Text>
+        </>
+      ) : (
+        <>
+          <Text style={styles.locationText}>
+            Not Connected ({ws?.readyState})
+          </Text>
+        </>
+      )}
 
       <View style={styles.locationButton}>
         <Button title="Get Location" color={'blue'} onPress={getLocation} />
       </View>
 
-      <View style={styles.locationButton}>
-        <Button title="Send Location" color={'blue'} />
-      </View>
-
+      <Text style={styles.locationText}>
+        Last Updated: {location && formatTimeDifference(location.timestamp)}
+      </Text>
       <Text style={styles.locationText}>
         Latitude: {location && location.coords.latitude.toString()}
       </Text>
