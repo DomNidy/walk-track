@@ -5,170 +5,97 @@
  * @format
  */
 
-import React, {useEffect, useState} from 'react';
-import {
-  Button,
-  PermissionsAndroid,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React from 'react';
+import {Button, SafeAreaView, StyleSheet, Text, View} from 'react-native';
 
-import Geolocation from 'react-native-geolocation-service';
+import {useGeolocationServer} from './common/useGeolocationServer';
 function App(): JSX.Element {
   // state to hold location
-  const [location, setLocation] = useState<null | Geolocation.GeoPosition>(
-    null,
-  );
+  const socket = useGeolocationServer('ws://10.0.2.2:8080');
 
-  const [connectionStatus, setConectionStatus] = useState<boolean>(false);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-  const [locationUpdateIntervalMS] = useState<number>(1_000);
+  // function formatTimeDifference(timestamp: number) {
+  //   const lastUpdated = new Date(timestamp);
+  //   const now = new Date();
+  //   const diffInSeconds = Math.floor(
+  //     (now.getTime() - lastUpdated.getTime()) / 1000,
+  //   );
+  //   const diffInMinutes = Math.floor(diffInSeconds / 60);
+  //   const diffInHours = Math.floor(diffInMinutes / 60);
 
-  useEffect(() => {
-    setConectionStatus(!!ws && ws?.readyState === WebSocket.OPEN);
-  }, [ws, ws?.readyState]);
-
-  useEffect(() => {
-    if (ws?.readyState === WebSocket.OPEN) {
-      return;
-    }
-
-    const newsocket = new WebSocket('ws://10.0.2.2:8080');
-
-    console.log('ws', newsocket.readyState);
-
-    newsocket.onopen = () => {
-      // connection opened
-      console.log('opened');
-      newsocket.send('something'); // send a message
-      setConectionStatus(true);
-    };
-
-    newsocket.onclose = e => {
-      // connection closed
-      console.log('closed', e.code, e.reason);
-      setConectionStatus(false);
-    };
-
-    newsocket.onmessage = e => {
-      // a message was received
-      console.log(e.data);
-    };
-
-    setWs(newsocket);
-
-    return () => {
-      newsocket.close();
-    };
-  }, [ws?.readyState]);
-
-  // Function to get permission for location
-  const requestLocationPermission = async () => {
-    try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        {
-          title: 'Geolocation Permission',
-          message: 'Can we access your location?',
-          buttonNeutral: 'Ask Me Later',
-          buttonNegative: 'Cancel',
-          buttonPositive: 'OK',
-        },
-      );
-      console.log('granted', granted);
-      if (granted === 'granted') {
-        console.log('You can use Geolocation');
-        return true;
-      } else {
-        console.log('You cannot use Geolocation');
-        return false;
-      }
-    } catch (err) {
-      return false;
-    }
-  };
-
-  // function to check permissions and get Location
-  const getLocation = () => {
-    const result = requestLocationPermission();
-    result.then(res => {
-      if (res) {
-        Geolocation.watchPosition(
-          position => {
-            setLocation(position);
-          },
-          error => {
-            console.log(error);
-          },
-          {
-            enableHighAccuracy: true,
-            interval: locationUpdateIntervalMS,
-          },
-        );
-      }
-    });
-  };
-
-  // Routinely send location to server
-  useEffect(() => {
-    const sendLocationInterval = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(location));
-      } else {
-        console.log("Not connected, can't send location");
-      }
-    }, locationUpdateIntervalMS);
-
-    return () => clearInterval(sendLocationInterval);
-  }, [location, locationUpdateIntervalMS, ws]);
-
-  function formatTimeDifference(timestamp: number) {
-    const lastUpdated = new Date(timestamp);
-    const now = new Date();
-    const diffInSeconds = Math.floor(
-      (now.getTime() - lastUpdated.getTime()) / 1000,
-    );
-    const diffInMinutes = Math.floor(diffInSeconds / 60);
-    const diffInHours = Math.floor(diffInMinutes / 60);
-
-    if (diffInHours > 0) {
-      return `${diffInHours} hours`;
-    } else if (diffInMinutes > 0) {
-      return `${diffInMinutes} minutes`;
-    } else {
-      return `${diffInSeconds} seconds`;
-    }
-  }
+  //   if (diffInHours > 0) {
+  //     return `${diffInHours} hours`;
+  //   } else if (diffInMinutes > 0) {
+  //     return `${diffInMinutes} minutes`;
+  //   } else {
+  //     return `${diffInSeconds} seconds`;
+  //   }
+  // }
   return (
     <SafeAreaView style={styles.backgroundStyles}>
       <Text style={styles.headerText}>WalkTrack</Text>
-      {connectionStatus ? (
+      {socket.connectionStatus ? (
         <>
-          <Text style={styles.locationText}>Connected</Text>
+          <Text style={styles.textLabel}>Connected</Text>
         </>
       ) : (
         <>
-          <Text style={styles.locationText}>
-            Not Connected ({ws?.readyState})
-          </Text>
+          <Text style={styles.textLabel}>Not Connected</Text>
         </>
       )}
 
-      <View style={styles.locationButton}>
-        <Button title="Get Location" color={'blue'} onPress={getLocation} />
-      </View>
+      {socket.geolocation?.location?.current && (
+        <View>
+          <Text style={styles.textLabel}>
+            Last Sync:{' '}
+            <Text style={styles.textData}>{socket.lastSyncTime}</Text>
+          </Text>
+          <Text style={styles.textLabel}>
+            Lat/Long:{' '}
+            <Text style={styles.textData}>
+              (
+              {socket.geolocation?.location?.current &&
+                socket.geolocation.location.current.coords.latitude.toFixed(5)}
+              ,{' '}
+              {socket.geolocation?.location?.current &&
+                socket.geolocation.location.current.coords.longitude.toFixed(5)}
+              )
+            </Text>
+          </Text>
+        </View>
+      )}
 
-      <Text style={styles.locationText}>
-        Last Updated: {location && formatTimeDifference(location.timestamp)}
-      </Text>
-      <Text style={styles.locationText}>
-        Latitude: {location && location.coords.latitude.toString()}
-      </Text>
-      <Text style={styles.locationText}>
-        Longitude: {location && location.coords.longitude.toString()}
-      </Text>
+      {socket.walkId && (
+        <View>
+          <Text style={styles.textLabel}>
+            WalkID: <Text style={styles.textData}>{socket.walkId}</Text>
+          </Text>
+          <Text style={styles.textLabel}>
+            Duration:{' '}
+            <Text style={styles.textData}>
+              {Math.floor(socket.walkDurationSec / 60)
+                .toString()
+                .padStart(2, '0')}
+              :{(socket.walkDurationSec % 60).toString().padStart(2, '0')}
+            </Text>
+          </Text>
+        </View>
+      )}
+
+      {!socket.walkId ? (
+        <Button
+          title="Begin Walk"
+          onPress={() => socket.beginWalk()}
+          disabled={!!socket.walkId}
+          color={'green'}
+        />
+      ) : (
+        <Button
+          title="End Walk"
+          onPress={() => socket.endWalk()}
+          disabled={!socket.walkId}
+          color={'red'}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -178,12 +105,21 @@ const styles = StyleSheet.create({
     color: '#f3f3f3',
     fontStyle: 'normal',
     fontSize: 45,
+    letterSpacing: -2,
+    fontWeight: '600',
   },
 
-  locationText: {
+  textLabel: {
     color: '#f3f3f3',
-    fontStyle: 'normal',
+    fontWeight: '600',
     fontSize: 22,
+    letterSpacing: -0.5,
+  },
+
+  textData: {
+    color: '#f3f3f3',
+    fontWeight: '400',
+    fontSize: 20,
   },
 
   backgroundStyles: {
@@ -199,9 +135,11 @@ const styles = StyleSheet.create({
     gap: 20,
   },
 
-  locationButton: {
+  locationButtonGroup: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     padding: 1,
-    width: 125,
+    width: 'auto',
     height: 'auto',
   },
 });
